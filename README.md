@@ -21,8 +21,6 @@ exits `0` only if all of it looks clean:
 - no node reporting `MemoryPressure` / `DiskPressure` / `PIDPressure`
 - no PDB would block a voluntary eviction (`disruptionsAllowed < 1`)
 - no workload pod stuck `Pending`, crash-looping, or failing to pull an image
-- if Flux is installed, it's healthy and fully reconciled (delegates to
-  `flux-checker.sh`) — skipped automatically if `FLUX_NAMESPACE` doesn't exist
 - *(optional)* the AKS control plane and node pools aren't already mid-operation
 
 ```bash
@@ -35,8 +33,10 @@ exits `0` only if all of it looks clean:
 |----------|---------|--------------|
 | `EXCLUDE_NAMESPACES` | `kube-system` | Space-separated namespaces to skip in the pod-health check. |
 | `RESTART_THRESHOLD` | `5` | Container restart count above which a pod is flagged unstable. |
-| `FLUX_NAMESPACE` | `flux-system` | Namespace Flux's controllers run in — see `flux-checker.sh`. |
 | `RESOURCE_GROUP` / `CLUSTER_NAME` | *(unset)* | Set both to also check via `az` that the AKS control plane and node pools are in `Succeeded` state (i.e. not already mid-upgrade). Skipped if either is unset. |
+
+Flux health isn't part of this check — run `flux-checker.sh` separately if
+you use Flux.
 
 ### `flux-checker.sh`
 

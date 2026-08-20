@@ -8,8 +8,6 @@
 #   - no node is reporting MemoryPressure / DiskPressure / PIDPressure
 #   - no PDB would block a voluntary eviction (disruptionsAllowed < 1)
 #   - no workload pod is stuck Pending, crash-looping, or failing to pull an image
-#   - if Flux is installed (FLUX_NAMESPACE exists), it's healthy and fully
-#     reconciled (delegates to flux-checker.sh) — skipped otherwise
 #   - (optional, needs `az` + RESOURCE_GROUP + CLUSTER_NAME) the AKS control
 #     plane and node pools aren't already mid-operation
 #
@@ -19,7 +17,6 @@
 # Options (environment variables):
 #   EXCLUDE_NAMESPACES=kube-system   Space-separated namespaces to skip in the pod-health check.
 #   RESTART_THRESHOLD=5              Container restart count above which a pod is flagged unstable.
-#   FLUX_NAMESPACE=flux-system       Namespace Flux's controllers run in (see flux-checker.sh).
 #   RESOURCE_GROUP=                  Azure resource group. Set together with CLUSTER_NAME to
 #   CLUSTER_NAME=                    also check the AKS control plane / node pool provisioning state.
 #
@@ -27,11 +24,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 EXCLUDE_NAMESPACES="${EXCLUDE_NAMESPACES:-kube-system}"
 RESTART_THRESHOLD="${RESTART_THRESHOLD:-5}"
-FLUX_NAMESPACE="${FLUX_NAMESPACE:-flux-system}"
 RESOURCE_GROUP="${RESOURCE_GROUP:-}"
 CLUSTER_NAME="${CLUSTER_NAME:-}"
 
@@ -119,10 +113,6 @@ check_pod_health() {
   echo "✅ No pending, crash-looping, or unstable pods."
 }
 
-check_flux() {
-  FLUX_NAMESPACE="$FLUX_NAMESPACE" bash "$SCRIPT_DIR/flux-checker.sh"
-}
-
 check_aks_provisioning_state() {
   require az
   local cp_state bad_pools
@@ -164,14 +154,6 @@ main() {
 
   echo "== Pod health =="
   check_pod_health || overall=1
-  echo
-
-  echo "== Flux =="
-  if kubectl get namespace "$FLUX_NAMESPACE" >/dev/null 2>&1; then
-    check_flux || overall=1
-  else
-    echo "⏭  Skipped ($FLUX_NAMESPACE namespace not found — Flux not installed?)."
-  fi
   echo
 
   echo "== AKS provisioning state (Azure) =="
