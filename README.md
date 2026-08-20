@@ -19,7 +19,7 @@ exits `0` only if all of it looks clean:
 
 - all nodes `Ready` and not cordoned
 - no node reporting `MemoryPressure` / `DiskPressure` / `PIDPressure`
-- no PDB would block a voluntary eviction (delegates to `pdb-checker.sh`)
+- no PDB would block a voluntary eviction (`disruptionsAllowed < 1`)
 - no workload pod stuck `Pending`, crash-looping, or failing to pull an image
 - if Flux is installed, it's healthy and fully reconciled (delegates to
   `flux-checker.sh`) — skipped automatically if `FLUX_NAMESPACE` doesn't exist
@@ -66,21 +66,6 @@ point at a chart version rather than a raw git commit. Suspended resources
 Gracefully skips the HelmRelease check (or the OCIRepository/Bucket source
 types) if those CRDs aren't installed — it only hard-fails if the Flux
 namespace or the Kustomization CRD itself is missing.
-
-### `pdb-checker.sh`
-
-Read-only check. Lists any PDB where `disruptionsAllowed < 1` — i.e. any
-PDB that would currently block a voluntary eviction (which is what
-`kubectl drain` / an AKS node upgrade relies on).
-
-```bash
-./pdb-checker.sh
-```
-
-- Exits `0` and prints `✅ All PDBs allow at least one disruption.` if
-  nothing is blocking.
-- Exits `1` and lists the offending `namespace/name` (with allowed/healthy
-  counts) if anything would block a drain. Useful as a CI/preflight gate.
 
 ### `pdb-toggle.sh`
 
@@ -171,5 +156,5 @@ pipeline UI be the confirmation step instead of the shell prompt.
 ## Setup
 
 ```bash
-chmod +x aks-preflight.sh pdb-checker.sh pdb-toggle.sh flux-checker.sh
+chmod +x aks-preflight.sh pdb-toggle.sh flux-checker.sh
 ```

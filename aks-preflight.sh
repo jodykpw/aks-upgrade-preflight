@@ -6,7 +6,7 @@
 # Checks:
 #   - all nodes are Ready and not cordoned
 #   - no node is reporting MemoryPressure / DiskPressure / PIDPressure
-#   - no PDB would block a voluntary eviction (delegates to pdb-checker.sh)
+#   - no PDB would block a voluntary eviction (disruptionsAllowed < 1)
 #   - no workload pod is stuck Pending, crash-looping, or failing to pull an image
 #   - if Flux is installed (FLUX_NAMESPACE exists), it's healthy and fully
 #     reconciled (delegates to flux-checker.sh) — skipped otherwise
@@ -77,7 +77,18 @@ check_node_pressure() {
 }
 
 check_pdbs() {
-  bash "$SCRIPT_DIR/pdb-checker.sh"
+  local bad
+  bad=$(kubectl get pdb -A -o json | jq -r '
+    .items[]
+    | select(.status.disruptionsAllowed < 1)
+    | "\(.metadata.namespace)/\(.metadata.name) (allowed=\(.status.disruptionsAllowed), healthy=\(.status.currentHealthy)/\(.status.desiredHealthy))"
+  ')
+  if [[ -n "$bad" ]]; then
+    echo "❌ PDBs that will block node drain:"
+    echo "$bad"
+    return 1
+  fi
+  echo "✅ All PDBs allow at least one disruption."
 }
 
 check_pod_health() {
