@@ -91,7 +91,10 @@ do_delete() {
   local backup; backup="$(do_backup)"   # always back up first
 
   local targets=()
-  while IFS= read -r line; do [[ -n "$line" ]] && targets+=("$line"); done < <(list_targets)
+  while IFS= read -r line; do
+    line="${line%$'\r'}"   # strip stray CR (e.g. Git Bash + native-Windows kubectl/jq writing CRLF)
+    [[ -n "$line" ]] && targets+=("$line")
+  done < <(list_targets)
 
   if [[ ${#targets[@]} -eq 0 ]]; then
     echo "No PDBs to delete after exclusions." >&2
