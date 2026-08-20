@@ -35,38 +35,6 @@ exits `0` only if all of it looks clean:
 | `RESTART_THRESHOLD` | `5` | Container restart count above which a pod is flagged unstable. |
 | `RESOURCE_GROUP` / `CLUSTER_NAME` | *(unset)* | Set both to also check via `az` that the AKS control plane and node pools are in `Succeeded` state (i.e. not already mid-upgrade). Skipped if either is unset. |
 
-Flux health isn't part of this check — run `flux-checker.sh` separately if
-you use Flux.
-
-### `flux-checker.sh`
-
-Read-only check that Flux is healthy and fully reconciled: controllers
-running, sources fetching, and every Kustomization (`ks`) / HelmRelease
-(`hr`) `Ready` and applied at the latest revision.
-
-```bash
-./flux-checker.sh
-```
-
-"On latest commit" means a Kustomization's applied revision matches its
-source's currently-fetched artifact revision — this is checked entirely
-from cluster state, not a live git remote lookup. A Kustomization can show
-`Ready=True` yet still be flagged here if its source has since fetched a
-newer revision it hasn't caught up to. HelmReleases are checked for `Ready`
-+ a non-stuck reconcile attempt only (no revision cross-check), since many
-point at a chart version rather than a raw git commit. Suspended resources
-(`spec.suspend: true`) are excluded from all checks.
-
-**Options (environment variables)**
-
-| Variable | Default | Description |
-|----------|---------|--------------|
-| `FLUX_NAMESPACE` | `flux-system` | Namespace the Flux controllers run in. |
-
-Gracefully skips the HelmRelease check (or the OCIRepository/Bucket source
-types) if those CRDs aren't installed — it only hard-fails if the Flux
-namespace or the Kustomization CRD itself is missing.
-
 ### `pdb-toggle.sh`
 
 Backs up, deletes, and restores PDBs around an upgrade window.
@@ -156,5 +124,5 @@ pipeline UI be the confirmation step instead of the shell prompt.
 ## Setup
 
 ```bash
-chmod +x aks-preflight.sh pdb-toggle.sh flux-checker.sh
+chmod +x aks-preflight.sh pdb-toggle.sh
 ```
