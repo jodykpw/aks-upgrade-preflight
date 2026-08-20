@@ -6,10 +6,16 @@
 # Actions:
 #   backup                 Dump ALL PDBs cluster-wide to a timestamped, restore-clean file.
 #   delete                 Back up first, then delete PDBs.
-#   restore <file>         Re-apply PDBs from a backup file (one apply, all namespaces).
+#   restore [file]          Re-apply PDBs from a backup file (one apply, all namespaces).
+#                           If [file] is omitted, restores the newest backup in BACKUP_DIR
+#                           (handy for a CI/CD restore step run without state from the
+#                           earlier delete step).
 #
 # Options (environment variables):
 #   BACKUP_DIR=./pdb-backups   Where backups are written.
+#   EXCLUDE_NAMESPACES="gatekeeper-system kube-system"
+#                              Space-separated namespaces to skip entirely (no backup,
+#                              delete, or restore).
 #   INCLUDE_SYSTEM=false       If true, ALSO delete Azure-managed system PDBs (see note below).
 #   DRY_RUN=false              If true, print what would be deleted but change nothing.
 #   FORCE=false                If true, skip the interactive confirmation (use in CI).
@@ -24,6 +30,7 @@
 set -euo pipefail
 
 BACKUP_DIR="${BACKUP_DIR:-./pdb-backups}"
+EXCLUDE_NAMESPACES="${EXCLUDE_NAMESPACES:-gatekeeper-system kube-system}"
 INCLUDE_SYSTEM="${INCLUDE_SYSTEM:-false}"
 DRY_RUN="${DRY_RUN:-false}"
 FORCE="${FORCE:-false}"
@@ -44,17 +51,21 @@ do_backup() {
   mkdir -p "$BACKUP_DIR"
   local out="${1:-$BACKUP_DIR/pdb-backup-$(timestamp).json}"
   kubectl get pdb -A -o json \
-    | jq '{apiVersion:"v1", kind:"List", items:[
-        .items[] | del(
-          .status,
-          .metadata.resourceVersion,
-          .metadata.uid,
-          .metadata.creationTimestamp,
-          .metadata.generation,
-          .metadata.managedFields,
-          .metadata.selfLink,
-          .metadata.annotations."kubectl.kubernetes.io/last-applied-configuration"
-        )]}' > "$out"
+    | jq --arg exns "$EXCLUDE_NAMESPACES" '
+        ($exns | split(" ") | map(select(length > 0))) as $excluded
+        | {apiVersion:"v1", kind:"List", items:[
+            .items[]
+            | select(.metadata.namespace as $n | ($excluded | index($n) | not))
+            | del(
+                .status,
+                .metadata.resourceVersion,
+                .metadata.uid,
+                .metadata.creationTimestamp,
+                .metadata.generation,
+                .metadata.managedFields,
+                .metadata.selfLink,
+                .metadata.annotations."kubectl.kubernetes.io/last-applied-configuration"
+              )]}' > "$out"
   local n; n=$(jq '.items | length' "$out")
   echo "Backed up $n PDB(s) -> $out" >&2
   echo "$out"
@@ -63,8 +74,10 @@ do_backup() {
 # Emit "namespace name" lines for the PDBs that should be deleted.
 list_targets() {
   kubectl get pdb -A -o json \
-    | jq -r --argjson sys "$SYSTEM_PDBS" --arg incl "$INCLUDE_SYSTEM" '
-        .items[]
+    | jq -r --argjson sys "$SYSTEM_PDBS" --arg incl "$INCLUDE_SYSTEM" --arg exns "$EXCLUDE_NAMESPACES" '
+        ($exns | split(" ") | map(select(length > 0))) as $excluded
+        | .items[]
+        | select(.metadata.namespace as $n | ($excluded | index($n) | not))
         | select(
             $incl == "true"
             or ( .metadata.namespace != "kube-system"
@@ -112,7 +125,13 @@ do_delete() {
 
 do_restore() {
   local file="${1:-}"
-  [[ -n "$file" ]] || { echo "ERROR: restore needs a file:  $0 restore <file>" >&2; exit 1; }
+  if [[ -z "$file" ]]; then
+    # No file given (e.g. a CI/CD restore step) — fall back to the newest
+    # backup in BACKUP_DIR. Filenames sort chronologically (pdb-backup-<timestamp>.json).
+    file="$(find "$BACKUP_DIR" -maxdepth 1 -name 'pdb-backup-*.json' -type f 2>/dev/null | sort | tail -n1)" || true
+    [[ -n "$file" ]] || { echo "ERROR: no file given and no backups found in $BACKUP_DIR:  $0 restore <file>" >&2; exit 1; }
+    echo "No file given — restoring latest backup: $file" >&2
+  fi
   [[ -f "$file" ]] || { echo "ERROR: file not found: $file" >&2; exit 1; }
   kubectl apply -f "$file"
 }

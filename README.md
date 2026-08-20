@@ -31,9 +31,9 @@ PDB that would currently block a voluntary eviction (which is what
 Backs up, deletes, and restores PDBs around an upgrade window.
 
 ```bash
-./pdb-toggle.sh backup                # dump all PDBs to a timestamped file
-./pdb-toggle.sh delete                # back up, then delete PDBs (with confirmation)
-./pdb-toggle.sh restore <backup-file> # re-apply PDBs from a backup
+./pdb-toggle.sh backup                  # dump all PDBs to a timestamped file
+./pdb-toggle.sh delete                  # back up, then delete PDBs (with confirmation)
+./pdb-toggle.sh restore [backup-file]   # re-apply PDBs from a backup (defaults to the latest in BACKUP_DIR)
 ```
 
 **Actions**
@@ -42,21 +42,26 @@ Backs up, deletes, and restores PDBs around an upgrade window.
 |-----------|--------------|
 | `backup`  | Dumps all PDBs cluster-wide to a restore-clean JSON file (server-side/status fields stripped). |
 | `delete`  | Always backs up first, then deletes PDBs. Prompts for confirmation unless `FORCE=true`. |
-| `restore <file>` | Re-applies PDBs from a backup file via `kubectl apply -f`. |
+| `restore [file]` | Re-applies PDBs from a backup file via `kubectl apply -f`. If `file` is omitted, restores the newest `pdb-backup-*.json` in `BACKUP_DIR` — so a CI/CD restore stage can run with no state passed from the earlier `delete` step, as long as both steps share `BACKUP_DIR` (e.g. the same persisted workspace or a downloaded artifact). |
 
 **Options (environment variables)**
 
 | Variable | Default | Description |
 |----------|---------|--------------|
 | `BACKUP_DIR` | `./pdb-backups` | Where backup files are written. |
-| `INCLUDE_SYSTEM` | `false` | If `true`, also delete Azure-managed system PDBs (`coredns-pdb`, `konnectivity-agent`, `metrics-server-pdb`, `calico-typha`, `ama-metrics-pdb`, `retina-pdb`) and everything in `kube-system`. |
+| `EXCLUDE_NAMESPACES` | `"gatekeeper-system kube-system"` | Space-separated namespaces to skip entirely — their PDBs are never backed up, deleted, or (transitively) restored. |
+| `INCLUDE_SYSTEM` | `false` | If `true`, also delete the named Azure-managed system PDBs (`coredns-pdb`, `konnectivity-agent`, `metrics-server-pdb`, `calico-typha`, `ama-metrics-pdb`, `retina-pdb`) in namespaces that aren't excluded. |
 | `DRY_RUN` | `false` | If `true`, print what would be deleted but change nothing. |
 | `FORCE` | `false` | If `true`, skip the interactive confirmation prompt (for CI). |
 
-By default, `delete` **excludes** `kube-system` and the known Azure-managed
-platform PDBs, since AKS reconciles those and deleting them mid-upgrade can
-disrupt in-cluster DNS / control-plane connectivity. Set `INCLUDE_SYSTEM=true`
-only if you're sure you want those gone too.
+`EXCLUDE_NAMESPACES` is a hard skip — it applies before anything else and
+isn't overridden by `INCLUDE_SYSTEM`. By default it covers `kube-system` and
+`gatekeeper-system`, since AKS/Gatekeeper reconcile PDBs in those namespaces
+and touching them mid-upgrade can disrupt in-cluster DNS, control-plane
+connectivity, or policy enforcement. To bring a namespace back into scope,
+override the variable (e.g. `EXCLUDE_NAMESPACES=gatekeeper-system` to allow
+`kube-system` PDBs through, combined with `INCLUDE_SYSTEM=true` if you also
+want the named platform PDBs deleted).
 
 **Example: safe delete/restore cycle around an upgrade**
 
