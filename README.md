@@ -8,8 +8,64 @@ blockers before an AKS (or any Kubernetes) node drain / cluster upgrade.
 - `kubectl`, configured against the target cluster
 - `jq`
 - bash
+- `az` — only needed if you use `aks-preflight.sh`'s optional Azure provisioning-state check
 
 ## Scripts
+
+### `aks-preflight.sh`
+
+Broader, read-only readiness check. Runs everything below in one pass and
+exits `0` only if all of it looks clean:
+
+- all nodes `Ready` and not cordoned
+- no node reporting `MemoryPressure` / `DiskPressure` / `PIDPressure`
+- no PDB would block a voluntary eviction (delegates to `pdb-checker.sh`)
+- no workload pod stuck `Pending`, crash-looping, or failing to pull an image
+- if Flux is installed, it's healthy and fully reconciled (delegates to
+  `flux-checker.sh`) — skipped automatically if `FLUX_NAMESPACE` doesn't exist
+- *(optional)* the AKS control plane and node pools aren't already mid-operation
+
+```bash
+./aks-preflight.sh
+```
+
+**Options (environment variables)**
+
+| Variable | Default | Description |
+|----------|---------|--------------|
+| `EXCLUDE_NAMESPACES` | `kube-system` | Space-separated namespaces to skip in the pod-health check. |
+| `RESTART_THRESHOLD` | `5` | Container restart count above which a pod is flagged unstable. |
+| `FLUX_NAMESPACE` | `flux-system` | Namespace Flux's controllers run in — see `flux-checker.sh`. |
+| `RESOURCE_GROUP` / `CLUSTER_NAME` | *(unset)* | Set both to also check via `az` that the AKS control plane and node pools are in `Succeeded` state (i.e. not already mid-upgrade). Skipped if either is unset. |
+
+### `flux-checker.sh`
+
+Read-only check that Flux is healthy and fully reconciled: controllers
+running, sources fetching, and every Kustomization (`ks`) / HelmRelease
+(`hr`) `Ready` and applied at the latest revision.
+
+```bash
+./flux-checker.sh
+```
+
+"On latest commit" means a Kustomization's applied revision matches its
+source's currently-fetched artifact revision — this is checked entirely
+from cluster state, not a live git remote lookup. A Kustomization can show
+`Ready=True` yet still be flagged here if its source has since fetched a
+newer revision it hasn't caught up to. HelmReleases are checked for `Ready`
++ a non-stuck reconcile attempt only (no revision cross-check), since many
+point at a chart version rather than a raw git commit. Suspended resources
+(`spec.suspend: true`) are excluded from all checks.
+
+**Options (environment variables)**
+
+| Variable | Default | Description |
+|----------|---------|--------------|
+| `FLUX_NAMESPACE` | `flux-system` | Namespace the Flux controllers run in. |
+
+Gracefully skips the HelmRelease check (or the OCIRepository/Bucket source
+types) if those CRDs aren't installed — it only hard-fails if the Flux
+namespace or the Kustomization CRD itself is missing.
 
 ### `pdb-checker.sh`
 
@@ -75,9 +131,9 @@ DRY_RUN=true ./pdb-toggle.sh delete        # preview what would be deleted
 ## Typical preflight workflow
 
 ```bash
-./pdb-checker.sh || ./pdb-toggle.sh delete   # if blocked, clear PDBs before draining
+./aks-preflight.sh || ./pdb-toggle.sh delete   # if blocked, clear PDBs before draining
 # ... run the upgrade ...
-./pdb-toggle.sh restore <backup-file>        # restore PDBs afterward
+./pdb-toggle.sh restore <backup-file>          # restore PDBs afterward
 ```
 
 ## CI/CD (GitLab example)
@@ -115,5 +171,5 @@ pipeline UI be the confirmation step instead of the shell prompt.
 ## Setup
 
 ```bash
-chmod +x pdb-checker.sh pdb-toggle.sh
+chmod +x aks-preflight.sh pdb-checker.sh pdb-toggle.sh flux-checker.sh
 ```
