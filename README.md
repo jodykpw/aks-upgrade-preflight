@@ -80,6 +80,38 @@ DRY_RUN=true ./pdb-toggle.sh delete        # preview what would be deleted
 ./pdb-toggle.sh restore <backup-file>        # restore PDBs afterward
 ```
 
+## CI/CD (GitLab example)
+
+There's no TTY in a CI runner, so `delete`'s interactive confirmation must
+be bypassed with `FORCE=true`. Backup and restore steps can share state via
+`BACKUP_DIR` (a persisted/cached path, or an uploaded+downloaded artifact)
+instead of passing a filename around:
+
+```yaml
+variables:
+  FORCE: "true"
+  BACKUP_DIR: "$CI_PROJECT_DIR/pdb-backups"
+
+delete-pdbs:
+  stage: pre-upgrade
+  script:
+    - ./pdb-toggle.sh delete
+  artifacts:
+    paths:
+      - pdb-backups/
+
+restore-pdbs:
+  stage: post-upgrade
+  script:
+    - ./pdb-toggle.sh restore   # no filename needed — picks up the newest file in BACKUP_DIR
+  dependencies:
+    - delete-pdbs
+```
+
+If you'd rather keep a human approval gate instead of an unattended
+`FORCE=true` delete, mark the job `when: manual` in GitLab and let the
+pipeline UI be the confirmation step instead of the shell prompt.
+
 ## Setup
 
 ```bash
